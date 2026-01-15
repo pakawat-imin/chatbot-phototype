@@ -3,12 +3,11 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import google.generativeai as genai
+from google import genai
 
 app = Flask(__name__)
 
-# --- ส่วนตั้งค่า (ดึง Key จาก Render) ---
-# ไม่ต้องแก้ตรงนี้ครับ เดี๋ยวเราไปกรอกรหัสจริงในเว็บ Render
+# --- ส่วนตั้งค่า ---
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
@@ -16,10 +15,10 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+# ตั้งค่า Client ของ Google GenAI (แบบใหม่)
+client = genai.Client(api_key=GEMINI_API_KEY)
 
-# --- ข้อมูลความรู้ของบอท (แก้ไขข้อมูลตรงนี้ได้เลย) ---
+# --- ข้อมูลความรู้ของบอท ---
 CITCOMS_KNOWLEDGE = """
 คุณคือผู้ช่วยอัจฉริยะประจำ CITCOMS (กองบริการเทคโนโลยีสารสนเทศและการสื่อสาร) มหาวิทยาลัยนเรศวร
 หน้าที่ของคุณคือตอบคำถามนิสิตและบุคลากรด้วยภาษาที่สุภาพ เป็นกันเอง และกระชับ
@@ -29,7 +28,6 @@ CITCOMS_KNOWLEDGE = """
 3. บริการซ่อมคอมพิวเตอร์: รับปรึกษาปัญหา Software เบื้องต้นฟรี! (ไม่รับซ่อม Hardware เช่น จอแตก)
 4. เวลาทำการ: จันทร์-ศุกร์ 08.30 - 16.30 น. (เว้นวันหยุดราชการ)
 5. เบอร์ติดต่อ: 0-5596-15xx
-(คุณสามารถเพิ่มข้อมูลอื่นๆ ได้ที่นี่...)
 """
 
 @app.route("/", methods=['GET'])
@@ -51,15 +49,24 @@ def handle_message(event):
     user_msg = event.message.text.strip()
     print(f"User asking: {user_msg}")
 
+    reply_text = "" # สร้างตัวแปรมารอรับคำตอบ
+
     try:
-        # ส่งข้อมูลให้ Gemini ประมวลผล
+        # เตรียมคำสั่ง (Prompt)
         prompt = f"{CITCOMS_KNOWLEDGE}\n\nUser ถามว่า: {user_msg}\nตอบสั้นๆ และสุภาพ:"
-        response = model.generate_content(prompt)
-        reply_text = response.text
+        
+        # ส่งให้ Gemini 3 ประมวลผล
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview", 
+            contents=prompt  # แก้จาก msg เป็น prompt
+        )
+        reply_text = response.text # แก้จาก reply เป็น reply_text
+        
     except Exception as e:
-        reply_text = "ขออภัย ระบบขัดข้องชั่วคราว"
+        reply_text = "ขออภัย ระบบขัดข้องชั่วคราว (Gemini Error)"
         print(f"Error: {e}")
 
+    # ส่งข้อความกลับเข้า LINE
     line_bot_api.reply_message(
         event.reply_token,
         TextSendMessage(text=reply_text)
